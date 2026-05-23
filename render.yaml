@@ -10,6 +10,10 @@ services:
     runtime: docker
     dockerfilePath: meetup-networking-agent/Dockerfile
     dockerContext: .
+    # Lock the start command explicitly so Render cannot fall back to
+    # any auto-detected entry point if the Dockerfile CMD is ever lost
+    # or overridden in the dashboard. agent.py is the only valid entry.
+    dockerCommand: python /app/meetup-networking-agent/agent.py
     healthCheckPath: /readyz
     autoDeploy: true
     envVars:
