@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import sys
 import uuid
@@ -73,6 +74,7 @@ from session import Session, get_session_store
 _log = get_logger(__name__)
 
 settings = get_settings()
+PORT = int(os.environ.get("PORT", "8000"))
 
 _EVENT_ID_PATTERN = re.compile(
     r"event_id[=:]\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
@@ -94,10 +96,18 @@ def _build_agent() -> Agent:
       ``AGENT_ENDPOINT``. This is what local dev uses.
     """
 
+    # Render only exposes one public port: $PORT. uAgents 0.25.1 does not
+    # accept an existing aiohttp app, so we keep our public aiohttp app on
+    # $PORT and move the uAgent ASGI server to a private localhost port.
+    # /submit is proxied back to this private port by _register_http_routes.
+    agent_port = settings.agent_port
+    if agent_port == PORT:
+        agent_port = PORT + 1
+
     kwargs: dict = {
         "name": settings.agent_name,
         "seed": settings.agent_seed,
-        "port": settings.agent_port,
+        "port": agent_port,
         "description": settings.agent_description,
         "publish_agent_details": True,
     }
@@ -112,6 +122,7 @@ def _build_agent() -> Agent:
 
 
 agent = _build_agent()
+AGENT_INTERNAL_PORT = int(getattr(agent, "_port", PORT + 1))
 
 chat_proto = Protocol(spec=chat_protocol_spec)
 
@@ -605,36 +616,76 @@ def _register_http_routes(app) -> None:
 
     register_callback_routes(app)
 
-    async def _status(_request: _web.Request) -> _web.Response:
-        attendees = 0
-        if settings.database_url:
-            try:
-                pool = await shared_db.get_pool()
-                async with pool.acquire() as conn:
-                    attendees = int(
-                        await conn.fetchval("SELECT count(*) FROM meetup_attendees")
-                        or 0
+    async def _attendee_count() -> int:
+        event_id = os.environ.get("DEFAULT_EVENT_ID", "")
+        pool = await shared_db.get_pool()
+        async with pool.acquire() as conn:
+            if event_id:
+                return int(
+                    await conn.fetchval(
+                        "SELECT count(*) FROM meetup_attendees WHERE event_id = $1",
+                        UUID(event_id),
                     )
-            except Exception as exc:
-                capture_exception(exc, op="status.count_attendees")
+                    or 0
+                )
+            return int(await conn.fetchval("SELECT count(*) FROM meetup_attendees") or 0)
+
+    async def _status(_request: _web.Request) -> _web.Response:
+        try:
+            attendees = await _attendee_count() if settings.database_url else 0
+        except Exception as exc:
+            capture_exception(exc, op="status.count_attendees")
+            attendees = -1
         return _web.json_response(
             {
                 "status": "live",
-                "agent": settings.agent_name,
-                "address": agent.address,
-                "environment": settings.environment,
-                "attendees_total": attendees,
+                "agent_address": agent.address,
+                "render_url": os.environ.get("RENDER_EXTERNAL_URL", "local"),
+                "attendees": attendees,
             }
         )
 
+    async def _submit_proxy(request: _web.Request) -> _web.Response:
+        """Forward public /submit traffic to the private uAgent ASGI server.
+
+        uAgents 0.25.1 cannot mount on our aiohttp app directly, while Render
+        only routes one external port. Keeping /submit here preserves the
+        normal HTTP endpoint for Agentverse inspector / direct clients without
+        moving health and OAuth callbacks off $PORT.
+        """
+
+        import aiohttp as _aiohttp
+
+        body = await request.read()
+        headers = dict(request.headers)
+        headers.pop("Host", None)
+        headers.pop("Content-Length", None)
+        async with _aiohttp.ClientSession() as session, session.post(
+            f"http://127.0.0.1:{AGENT_INTERNAL_PORT}/submit",
+            data=body,
+            headers=headers,
+        ) as resp:
+            proxy_headers = {
+                key: value
+                for key, value in resp.headers.items()
+                if key.lower()
+                not in {"content-length", "transfer-encoding", "connection"}
+            }
+            return _web.Response(
+                body=await resp.read(),
+                status=resp.status,
+                headers=proxy_headers,
+            )
+
     app.router.add_get("/status", _status)
+    app.router.add_post("/submit", _submit_proxy)
 
 
 @agent.on_event("startup")
 async def _on_startup(ctx: Context) -> None:
     sentry_init(service=settings.agent_name, environment=settings.environment)
 
-    await health.start_health_server(extra_routes=_register_http_routes)
+    await health.start_health_server(port=PORT, extra_routes=_register_http_routes)
 
     if settings.database_url:
         ok = await shared_db.healthcheck()
@@ -651,6 +702,8 @@ async def _on_startup(ctx: Context) -> None:
                 "env": settings.environment,
                 "address": agent.address,
                 "transport": "mailbox" if settings.agent_mailbox else "http",
+                "public_port": PORT,
+                "uagent_port": AGENT_INTERNAL_PORT,
                 "prompt_len": len(_load_system_prompt()),
             }
         )
