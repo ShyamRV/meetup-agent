@@ -17,7 +17,6 @@ import sys
 
 import asyncpg
 
-
 EXPECTED_TABLES = {
     "meetup_events",
     "meetup_attendees",

@@ -21,7 +21,6 @@ from pathlib import Path
 
 import asyncpg
 
-
 _CANDIDATE_DIRS = (
     # Local checkout layout: <repo>/agents-db/migrations
     Path(__file__).resolve().parents[2] / "agents-db" / "migrations",

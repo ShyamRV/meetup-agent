@@ -42,7 +42,7 @@ _HTML_SUCCESS = (
     "<h1>You're connected.</h1>\n"
     "<p>Return to the chat in ASI:One \u2014 your check-in will continue automatically.</p>\n"
     "</body></html>\n"
-).encode("utf-8")
+).encode()
 
 
 async def _oauth_callback(request: web.Request) -> web.Response:
