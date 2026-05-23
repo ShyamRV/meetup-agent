@@ -1,0 +1,62 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.Python
+build/
+dist/
+develop-eggs/
+downloads/
+sdist/
+wheels/
+*.manifest
+*.spec
+.installed.cfg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- Virtualenvs ------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Tooling caches ---------------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# --- Secrets & local config -------------------------------------------------
+# Never commit real environment files. `.env.example` is the only one allowed.
+.env
+.env.*
+!.env.example
+
+# --- Generated artefacts ----------------------------------------------------
+meetup_qr*.png
+*.qr.png
+
+# --- OS junk ----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editors ----------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Docker / local data ----------------------------------------------------
+*.log
+postgres-data/
+pgdata/
